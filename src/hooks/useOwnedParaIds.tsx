@@ -19,8 +19,18 @@ type OptionalChainValue = {
   unwrap?: () => { toString: () => string }
 }
 
+const getAddressVariants = (address: string, ss58Prefix: number) => {
+  const addresses = new Set([address])
+  try {
+    addresses.add(encodeAddress(address, ss58Prefix))
+  } catch {
+    return addresses
+  }
+  return addresses
+}
+
 export const useOwnedParaIds = () => {
-  const { activeAccount, activeChain, api } = useInkathon()
+  const { activeAccount, activeChain, activeRelayChain, relayApi } = useInkathon()
   const pathname = usePathname()
   const network = getChainFromPath(pathname)
   const [ownedParaIds, setOwnedParaIds] = useState<OwnedParaId[]>([])
@@ -30,15 +40,16 @@ export const useOwnedParaIds = () => {
     let mounted = true
 
     const fetchOwnedParaIds = async () => {
-      if (!api?.query?.registrar?.paras || !activeAccount) {
+      if (!relayApi?.query?.registrar?.paras || !activeAccount) {
         setOwnedParaIds([])
         return
       }
 
       setLoading(true)
       try {
-        const activeAddress = encodeAddress(activeAccount.address, activeChain?.ss58Prefix || 42)
-        const entries = await api.query.registrar.paras.entries()
+        const relaySs58Prefix = activeRelayChain?.ss58Prefix || activeChain?.ss58Prefix || 42
+        const activeAddresses = getAddressVariants(activeAccount.address, relaySs58Prefix)
+        const entries = await relayApi.query.registrar.paras.entries()
 
         const owned = entries
           .map(
@@ -53,7 +64,7 @@ export const useOwnedParaIds = () => {
               const manager = paraInfo.manager.toString()
               const paraIdNumber = parseFormattedNumber(paraId.toString())
 
-              if (manager !== activeAddress && manager !== activeAccount.address) return null
+              if (!activeAddresses.has(manager)) return null
 
               return {
                 paraId: paraIdNumber,
@@ -65,11 +76,11 @@ export const useOwnedParaIds = () => {
 
         const ids = owned.map(({ paraId }) => paraId)
         const [codeHashes, lifecycles] = await Promise.all([
-          api.query.paras?.currentCodeHash?.multi
-            ? api.query.paras.currentCodeHash.multi(ids)
+          relayApi.query.paras?.currentCodeHash?.multi
+            ? relayApi.query.paras.currentCodeHash.multi(ids)
             : Promise.resolve([]),
-          api.query.paras?.paraLifecycles?.multi
-            ? api.query.paras.paraLifecycles.multi(ids)
+          relayApi.query.paras?.paraLifecycles?.multi
+            ? relayApi.query.paras.paraLifecycles.multi(ids)
             : Promise.resolve([]),
         ])
 
@@ -100,7 +111,7 @@ export const useOwnedParaIds = () => {
     return () => {
       mounted = false
     }
-  }, [activeAccount, activeChain, api, network])
+  }, [activeAccount, activeChain, activeRelayChain, network, relayApi])
 
   return { ownedParaIds, loading }
 }
